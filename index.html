@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CRAN Download Viewer</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: #f7f8fa;
+      color: #1a1a2e;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      background: #fff;
+      border-bottom: 1px solid #e2e4e9;
+      padding: 1.5rem 2rem;
+    }
+
+    header h1 {
+      font-size: 1.5rem;
+      font-weight: 700;
+      margin-bottom: 0.25rem;
+    }
+
+    header p {
+      color: #6b7280;
+      font-size: 0.9rem;
+    }
+
+    .controls {
+      background: #fff;
+      border-bottom: 1px solid #e2e4e9;
+      padding: 1rem 2rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      align-items: center;
+    }
+
+    .input-group {
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    #pkg-input {
+      padding: 0.5rem 0.75rem;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      width: 220px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    #pkg-input:focus {
+      border-color: #2563eb;
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+    }
+
+    #add-btn {
+      padding: 0.5rem 1rem;
+      background: #2563eb;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    #add-btn:hover { background: #1d4ed8; }
+
+    .time-range {
+      display: flex;
+      gap: 0.25rem;
+      margin-left: auto;
+    }
+
+    .time-range button {
+      padding: 0.4rem 0.75rem;
+      background: #f3f4f6;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      cursor: pointer;
+      transition: all 0.15s;
+      color: #374151;
+    }
+
+    .time-range button.active {
+      background: #2563eb;
+      color: #fff;
+      border-color: #2563eb;
+    }
+
+    .time-range button:hover:not(.active) {
+      background: #e5e7eb;
+    }
+
+    .packages-bar {
+      padding: 0.75rem 2rem;
+      background: #fff;
+      border-bottom: 1px solid #e2e4e9;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      min-height: 2.75rem;
+      align-items: center;
+    }
+
+    .packages-bar:empty::after {
+      content: "Add a package above to get started";
+      color: #9ca3af;
+      font-size: 0.85rem;
+    }
+
+    .pkg-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.3rem 0.6rem;
+      border-radius: 9999px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: #fff;
+      cursor: default;
+    }
+
+    .pkg-chip .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.7);
+    }
+
+    .pkg-chip .remove {
+      cursor: pointer;
+      margin-left: 0.15rem;
+      opacity: 0.7;
+      font-size: 1rem;
+      line-height: 1;
+      transition: opacity 0.15s;
+    }
+
+    .pkg-chip .remove:hover { opacity: 1; }
+
+    .chart-container {
+      flex: 1;
+      padding: 1.5rem 2rem;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .chart-wrapper {
+      flex: 1;
+      position: relative;
+      background: #fff;
+      border-radius: 10px;
+      border: 1px solid #e2e4e9;
+      padding: 1rem;
+      min-height: 400px;
+    }
+
+    #chart-placeholder {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #9ca3af;
+      font-size: 1rem;
+    }
+
+    .smoothing-toggle {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-size: 0.8rem;
+      color: #6b7280;
+    }
+
+    .smoothing-toggle input { cursor: pointer; }
+
+    .status {
+      padding: 0.5rem 2rem;
+      font-size: 0.8rem;
+      color: #6b7280;
+      min-height: 1.5rem;
+    }
+
+    .status.error { color: #dc2626; }
+
+    footer {
+      padding: 1rem 2rem;
+      text-align: center;
+      font-size: 0.8rem;
+      color: #9ca3af;
+      border-top: 1px solid #e2e4e9;
+      background: #fff;
+    }
+
+    footer a {
+      color: #2563eb;
+      text-decoration: none;
+    }
+
+    footer a:hover { text-decoration: underline; }
+
+    @media (max-width: 640px) {
+      header, .controls, .packages-bar, .chart-container, .status {
+        padding-left: 1rem;
+        padding-right: 1rem;
+      }
+      #pkg-input { width: 150px; }
+      .time-range { margin-left: 0; }
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>CRAN Download Viewer</h1>
+    <p>Track R package downloads over time. Data from the cranlogs API.</p>
+  </header>
+
+  <div class="controls">
+    <div class="input-group">
+      <input type="text" id="pkg-input" placeholder="Enter package name..." autocomplete="off" spellcheck="false">
+      <button id="add-btn">Add</button>
+    </div>
+    <div class="smoothing-toggle">
+      <input type="checkbox" id="smooth-toggle" checked>
+      <label for="smooth-toggle">7-day rolling average</label>
+    </div>
+    <div class="time-range">
+      <button data-range="last-week">1W</button>
+      <button data-range="last-month" class="active">1M</button>
+      <button data-range="last-3-months">3M</button>
+      <button data-range="last-year">1Y</button>
+    </div>
+  </div>
+
+  <div class="packages-bar" id="packages-bar"></div>
+
+  <div class="status" id="status"></div>
+
+  <div class="chart-container">
+    <div class="chart-wrapper">
+      <div id="chart-placeholder">Add a package to see download statistics</div>
+      <canvas id="chart"></canvas>
+    </div>
+  </div>
+
+  <footer>
+    MIT License &middot; Built by <a href="https://github.com/maflot" target="_blank" rel="noopener">maflot</a>
+    &middot; Data from <a href="https://cranlogs.r-pkg.org/" target="_blank" rel="noopener">cranlogs</a>
+  </footer>
+
+<script>
+(function () {
+  const COLORS = [
+    '#2563eb', '#dc2626', '#16a34a', '#d97706', '#7c3aed',
+    '#db2777', '#0891b2', '#65a30d', '#ea580c', '#6366f1',
+    '#0d9488', '#c026d3', '#ca8a04', '#e11d48', '#4f46e5',
+  ];
+
+  const API_BASE = 'https://cranlogs.r-pkg.org/downloads/daily';
+
+  let packages = [];   // { name, color, rawData }
+  let colorIdx = 0;
+  let chart = null;
+  let currentRange = 'last-month';
+  let smoothing = true;
+
+  const input = document.getElementById('pkg-input');
+  const addBtn = document.getElementById('add-btn');
+  const bar = document.getElementById('packages-bar');
+  const status = document.getElementById('status');
+  const placeholder = document.getElementById('chart-placeholder');
+  const smoothToggle = document.getElementById('smooth-toggle');
+  const canvas = document.getElementById('chart');
+
+  // --- URL hash state ---
+  function saveState() {
+    const names = packages.map(p => p.name);
+    const hash = names.length ? `#packages=${names.join(',')}` : '';
+    history.replaceState(null, '', location.pathname + hash);
+    localStorage.setItem('cran_packages', JSON.stringify(names));
+  }
+
+  function loadState() {
+    const hash = location.hash;
+    if (hash.startsWith('#packages=')) {
+      return hash.slice('#packages='.length).split(',').filter(Boolean);
+    }
+    try {
+      const stored = JSON.parse(localStorage.getItem('cran_packages'));
+      if (Array.isArray(stored)) return stored.filter(Boolean);
+    } catch {}
+    return [];
+  }
+
+  // --- API ---
+  async function fetchDownloads(pkgName, range) {
+    const url = `${API_BASE}/${range}/${encodeURIComponent(pkgName)}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Package "${pkgName}" not found`);
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    return data[0].downloads; // [{ day: "2024-01-01", downloads: 123 }, ...]
+  }
+
+  // --- Smoothing ---
+  function rollingAverage(data, window) {
+    if (window <= 1) return data;
+    return data.map((point, i) => {
+      const start = Math.max(0, i - window + 1);
+      const slice = data.slice(start, i + 1);
+      const avg = slice.reduce((s, p) => s + p.downloads, 0) / slice.length;
+      return { day: point.day, downloads: Math.round(avg) };
+    });
+  }
+
+  // --- Chart ---
+  function initChart() {
+    const ctx = canvas.getContext('2d');
+    chart = new Chart(ctx, {
+      type: 'line',
+      data: { datasets: [] },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            backgroundColor: 'rgba(0,0,0,0.8)',
+            titleFont: { size: 13 },
+            bodyFont: { size: 12 },
+            padding: 10,
+            cornerRadius: 6,
+            callbacks: {
+              label: function(ctx) {
+                return `${ctx.dataset.label}: ${ctx.parsed.y.toLocaleString()}`;
+              }
+            }
+          }
+        },
+        scales: {
+          x: {
+            type: 'time',
+            time: { unit: 'day', tooltipFormat: 'MMM d, yyyy' },
+            grid: { display: false },
+            ticks: { maxTicksLimit: 12 }
+          },
+          y: {
+            beginAtZero: true,
+            grid: { color: '#f0f0f0' },
+            ticks: {
+              callback: function(v) {
+                if (v >= 1000) return (v / 1000).toFixed(v >= 10000 ? 0 : 1) + 'k';
+                return v;
+              }
+            }
+          }
+        }
+      }
+    });
+  }
+
+  function updateChart() {
+    if (!chart) initChart();
+    const datasets = packages.map(pkg => {
+      const data = smoothing ? rollingAverage(pkg.rawData, 7) : pkg.rawData;
+      return {
+        label: pkg.name,
+        data: data.map(d => ({ x: d.day, y: d.downloads })),
+        borderColor: pkg.color,
+        backgroundColor: pkg.color + '18',
+        borderWidth: 2,
+        pointRadius: 0,
+        pointHitRadius: 8,
+        tension: 0.3,
+        fill: false,
+      };
+    });
+    chart.data.datasets = datasets;
+    chart.update();
+    placeholder.style.display = packages.length ? 'none' : 'flex';
+  }
+
+  // --- Chips ---
+  function renderChips() {
+    bar.innerHTML = '';
+    packages.forEach(pkg => {
+      const chip = document.createElement('span');
+      chip.className = 'pkg-chip';
+      chip.style.background = pkg.color;
+      chip.innerHTML = `<span class="dot"></span>${pkg.name}<span class="remove" data-pkg="${pkg.name}">&times;</span>`;
+      bar.appendChild(chip);
+    });
+    if (!packages.length) {
+      bar.innerHTML = '';
+    }
+  }
+
+  bar.addEventListener('click', (e) => {
+    if (e.target.classList.contains('remove')) {
+      removePackage(e.target.dataset.pkg);
+    }
+  });
+
+  // --- Add / Remove ---
+  async function addPackage(name) {
+    name = name.trim().toLowerCase();
+    if (!name) return;
+    if (packages.find(p => p.name === name)) {
+      setStatus(`"${name}" is already added`, true);
+      return;
+    }
+
+    setStatus(`Fetching data for "${name}"...`);
+    try {
+      const rawData = await fetchDownloads(name, currentRange);
+      const color = COLORS[colorIdx % COLORS.length];
+      colorIdx++;
+      packages.push({ name, color, rawData });
+      saveState();
+      renderChips();
+      updateChart();
+      setStatus('');
+    } catch (err) {
+      setStatus(err.message, true);
+    }
+  }
+
+  function removePackage(name) {
+    packages = packages.filter(p => p.name !== name);
+    saveState();
+    renderChips();
+    updateChart();
+    setStatus('');
+  }
+
+  async function refreshAll() {
+    if (!packages.length) return;
+    setStatus('Refreshing...');
+    try {
+      await Promise.all(packages.map(async (pkg) => {
+        pkg.rawData = await fetchDownloads(pkg.name, currentRange);
+      }));
+      updateChart();
+      setStatus('');
+    } catch (err) {
+      setStatus(err.message, true);
+    }
+  }
+
+  // --- Status ---
+  function setStatus(msg, isError) {
+    status.textContent = msg;
+    status.className = isError ? 'status error' : 'status';
+  }
+
+  // --- Events ---
+  addBtn.addEventListener('click', () => {
+    addPackage(input.value);
+    input.value = '';
+    input.focus();
+  });
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      addPackage(input.value);
+      input.value = '';
+    }
+  });
+
+  document.querySelectorAll('.time-range button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelector('.time-range .active').classList.remove('active');
+      btn.classList.add('active');
+      currentRange = btn.dataset.range;
+      refreshAll();
+    });
+  });
+
+  smoothToggle.addEventListener('change', () => {
+    smoothing = smoothToggle.checked;
+    updateChart();
+  });
+
+  // --- Init ---
+  initChart();
+  const initial = loadState();
+  if (initial.length) {
+    (async () => {
+      for (const name of initial) {
+        await addPackage(name);
+      }
+    })();
+  }
+})();
+</script>
+
+</body>
+</html>
