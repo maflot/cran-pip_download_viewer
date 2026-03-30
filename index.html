@@ -309,13 +309,33 @@
   }
 
   // --- API ---
+  function rangeToApiPath(range) {
+    // cranlogs only supports last-day, last-week, last-month as named ranges.
+    // For longer periods, compute explicit start:end date strings.
+    if (range === 'last-week' || range === 'last-month') return range;
+    const today = new Date();
+    const end = today.toISOString().slice(0, 10);
+    let start;
+    if (range === 'last-3-months') {
+      const d = new Date(today);
+      d.setMonth(d.getMonth() - 3);
+      start = d.toISOString().slice(0, 10);
+    } else if (range === 'last-year') {
+      const d = new Date(today);
+      d.setFullYear(d.getFullYear() - 1);
+      start = d.toISOString().slice(0, 10);
+    }
+    return `${start}:${end}`;
+  }
+
   async function fetchDownloads(pkgName, range) {
-    const url = `${API_BASE}/${range}/${encodeURIComponent(pkgName)}`;
+    const apiPath = rangeToApiPath(range);
+    const url = `${API_BASE}/${apiPath}/${encodeURIComponent(pkgName)}`;
     const res = await fetch(url);
     if (!res.ok) throw new Error(`Package "${pkgName}" not found`);
     const data = await res.json();
     if (data.error) throw new Error(data.error);
-    return data[0].downloads; // [{ day: "2024-01-01", downloads: 123 }, ...]
+    return data[0].downloads;
   }
 
   // --- Smoothing ---
