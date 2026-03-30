@@ -319,20 +319,37 @@
   const PYPI_API = 'https://pypistats.org/api/packages';
   const CORS_PROXY = 'https://corsproxy.io/?';
 
-  // Retry a fetch up to `retries` times with a delay between attempts
-  async function fetchWithRetry(url, retries = 2, delay = 800) {
+  // Retry a fetch up to `retries` times with a delay between attempts.
+  // Handles HTML error pages (pypistats returns HTML on 404/429).
+  async function fetchWithRetry(url, retries = 2, delay = 1000) {
+    let lastError;
     for (let attempt = 0; attempt <= retries; attempt++) {
-      const res = await fetch(url);
-      if (res.ok) {
-        const data = await res.json();
-        if (data && !data.error) return data;
+      try {
+        const res = await fetch(url);
+        const text = await res.text();
+        let data;
+        try { data = JSON.parse(text); } catch {
+          // Non-JSON response (HTML error page)
+          if (res.status === 429) { lastError = new Error('Rate limited — try again shortly'); }
+          else if (res.status === 404) { throw new Error('Package not found'); }
+          else { lastError = new Error(`Unexpected response (HTTP ${res.status})`); }
+          if (attempt < retries) { await new Promise(r => setTimeout(r, delay * (attempt + 1))); continue; }
+          throw lastError;
+        }
+        if (!res.ok) {
+          if (data && data.error) throw new Error(data.error);
+          throw new Error(`HTTP ${res.status}`);
+        }
         if (data && data.error) throw new Error(data.error);
-      }
-      if (attempt < retries) {
-        await new Promise(r => setTimeout(r, delay * (attempt + 1)));
+        return data;
+      } catch (err) {
+        lastError = err;
+        // Don't retry on "not found" — it won't change
+        if (err.message === 'Package not found') throw err;
+        if (attempt < retries) { await new Promise(r => setTimeout(r, delay * (attempt + 1))); }
       }
     }
-    throw new Error('Failed after retries');
+    throw lastError;
   }
 
   let packages = [];   // { name, registry, color, rawData }
@@ -592,14 +609,20 @@
   async function refreshAll() {
     if (!packages.length) return;
     setStatus('Refreshing...');
-    try {
-      await Promise.all(packages.map(async (pkg) => {
+    const errors = [];
+    // Fetch sequentially to avoid rate limits
+    for (const pkg of packages) {
+      try {
         pkg.rawData = await fetchDownloads(pkg.name, pkg.registry, currentRange);
-      }));
-      updateChart();
+      } catch (err) {
+        errors.push(`${pkg.name}: ${err.message}`);
+      }
+    }
+    updateChart();
+    if (errors.length) {
+      setStatus(errors.join('; '), true);
+    } else {
       setStatus('');
-    } catch (err) {
-      setStatus(err.message, true);
     }
   }
 
