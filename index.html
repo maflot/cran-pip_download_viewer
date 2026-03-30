@@ -319,6 +319,22 @@
   const PYPI_API = 'https://pypistats.org/api/packages';
   const CORS_PROXY = 'https://corsproxy.io/?';
 
+  // Retry a fetch up to `retries` times with a delay between attempts
+  async function fetchWithRetry(url, retries = 2, delay = 800) {
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      const res = await fetch(url);
+      if (res.ok) {
+        const data = await res.json();
+        if (data && !data.error) return data;
+        if (data && data.error) throw new Error(data.error);
+      }
+      if (attempt < retries) {
+        await new Promise(r => setTimeout(r, delay * (attempt + 1)));
+      }
+    }
+    throw new Error('Failed after retries');
+  }
+
   let packages = [];   // { name, registry, color, rawData }
   let colorIdx = 0;
   let chart = null;
@@ -406,24 +422,22 @@
     const apiPath = cranApiPath(range);
     const target = `${CRAN_API}/${apiPath}/${encodeURIComponent(pkgName)}`;
     const url = `${CORS_PROXY}${encodeURIComponent(target)}`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`CRAN package "${pkgName}" not found`);
-    const data = await res.json();
-    if (data.error) throw new Error(data.error);
-    return data[0].downloads; // [{ day, downloads }]
+    const data = await fetchWithRetry(url);
+    if (!Array.isArray(data) || !data[0] || !Array.isArray(data[0].downloads)) {
+      throw new Error(`CRAN package "${pkgName}" not found`);
+    }
+    return data[0].downloads;
   }
 
   // --- PyPI API ---
   async function fetchPypiDownloads(pkgName, range) {
     const target = `${PYPI_API}/${encodeURIComponent(pkgName)}/overall?mirrors=true`;
     const url = `${CORS_PROXY}${encodeURIComponent(target)}`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`PyPI package "${pkgName}" not found`);
-    const data = await res.json();
-    if (data.error) throw new Error(data.error);
+    const data = await fetchWithRetry(url);
+    if (!data.data || !Array.isArray(data.data)) {
+      throw new Error(`PyPI package "${pkgName}" not found`);
+    }
 
-    // pypistats returns ~180 days of with_mirrors + without_mirrors entries.
-    // Filter to with_mirrors only, then slice to requested range.
     const withMirrors = data.data
       .filter(d => d.category === 'with_mirrors')
       .map(d => ({ day: d.date, downloads: d.downloads }))
@@ -501,7 +515,7 @@
 
   function updateChart() {
     if (!chart) initChart();
-    const datasets = packages.map(pkg => {
+    const datasets = packages.filter(pkg => Array.isArray(pkg.rawData)).map(pkg => {
       const data = smoothing ? rollingAverage(pkg.rawData, 7) : pkg.rawData;
       const label = `${pkg.name} (${pkg.registry.toUpperCase()})`;
       return {
