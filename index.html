@@ -556,8 +556,9 @@
 
   // --- Add / Remove ---
   async function addPackage(name, registry) {
-    name = name.trim().toLowerCase();
     registry = registry || currentRegistry;
+    // PyPI requires lowercase; CRAN is case-sensitive — preserve user input
+    name = registry === 'pypi' ? name.trim().toLowerCase() : name.trim();
     if (!name) return;
     const key = `${registry}:${name}`;
     if (packages.find(p => `${p.registry}:${p.name}` === key)) {
