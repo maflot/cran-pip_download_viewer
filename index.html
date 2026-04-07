@@ -282,6 +282,10 @@
       <input type="checkbox" id="smooth-toggle" checked>
       <label for="smooth-toggle">7-day rolling average</label>
     </div>
+    <div class="smoothing-toggle">
+      <input type="checkbox" id="normalize-toggle">
+      <label for="normalize-toggle">Normalize (% of ecosystem)</label>
+    </div>
     <div class="time-range">
       <button data-range="last-week">1W</button>
       <button data-range="last-month" class="active">1M</button>
@@ -358,6 +362,10 @@
   let currentRange = 'last-month';
   let currentRegistry = 'cran';
   let smoothing = true;
+  let normalizing = false;
+
+  // Cache ecosystem totals per registry+range to avoid re-fetching
+  const totalsCache = {};  // key: "cran:last-month" → Map(day → downloads)
 
   const input = document.getElementById('pkg-input');
   const addBtn = document.getElementById('add-btn');
@@ -365,6 +373,7 @@
   const statusEl = document.getElementById('status');
   const placeholder = document.getElementById('chart-placeholder');
   const smoothToggle = document.getElementById('smooth-toggle');
+  const normalizeToggle = document.getElementById('normalize-toggle');
   const canvas = document.getElementById('chart');
 
   // --- Registry toggle ---
@@ -502,6 +511,7 @@
             cornerRadius: 6,
             callbacks: {
               label: function(ctx) {
+                if (normalizing) return `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(3)}%`;
                 return `${ctx.dataset.label}: ${ctx.parsed.y.toLocaleString()}`;
               }
             }
@@ -530,14 +540,67 @@
     });
   }
 
-  function updateChart() {
+  // --- Ecosystem totals for normalization ---
+  // CRAN totals use special package name "R"; PyPI uses "__all__"
+  async function getEcosystemTotals(registry, range) {
+    const key = `${registry}:${range}`;
+    if (totalsCache[key]) return totalsCache[key];
+    const pkgName = registry === 'pypi' ? '__all__' : 'R';
+    const data = await fetchDownloads(pkgName, registry, range);
+    const map = new Map(data.map(d => [d.day, d.downloads]));
+    totalsCache[key] = map;
+    return map;
+  }
+
+  function clearTotalsCache() {
+    Object.keys(totalsCache).forEach(k => delete totalsCache[k]);
+  }
+
+  // Build a sorted union of all dates across packages so every dataset
+  // has an entry for every day.  Missing days become null (gap in line).
+  function alignDates(pkgsWithData) {
+    const dateSet = new Set();
+    pkgsWithData.forEach(pkg => pkg.forEach(d => dateSet.add(d.day)));
+    return Array.from(dateSet).sort();
+  }
+
+  async function updateChart() {
     if (!chart) initChart();
-    const datasets = packages.filter(pkg => Array.isArray(pkg.rawData)).map(pkg => {
-      const data = smoothing ? rollingAverage(pkg.rawData, 7) : pkg.rawData;
+    const valid = packages.filter(pkg => Array.isArray(pkg.rawData));
+    const processed = valid.map(pkg =>
+      smoothing ? rollingAverage(pkg.rawData, 7) : pkg.rawData
+    );
+    const allDates = alignDates(processed);
+
+    // Fetch ecosystem totals if normalizing
+    let totalsMaps = {};
+    if (normalizing && valid.length) {
+      const registries = [...new Set(valid.map(p => p.registry))];
+      for (const reg of registries) {
+        try {
+          totalsMaps[reg] = await getEcosystemTotals(reg, currentRange);
+        } catch (err) {
+          setStatus(`Could not fetch ${reg.toUpperCase()} totals: ${err.message}`, true);
+          return;
+        }
+      }
+    }
+
+    const datasets = valid.map((pkg, i) => {
+      const byDay = new Map(processed[i].map(d => [d.day, d.downloads]));
+      const totals = totalsMaps[pkg.registry];
       const label = `${pkg.name} (${pkg.registry.toUpperCase()})`;
       return {
         label,
-        data: data.map(d => ({ x: d.day, y: d.downloads })),
+        data: allDates.map(day => {
+          if (!byDay.has(day)) return { x: day, y: null };
+          const raw = byDay.get(day);
+          if (normalizing && totals) {
+            const total = totals.get(day);
+            return { x: day, y: total ? (raw / total) * 100 : null };
+          }
+          return { x: day, y: raw };
+        }),
         borderColor: pkg.color,
         backgroundColor: pkg.color + '18',
         borderWidth: 2,
@@ -545,9 +608,20 @@
         pointHitRadius: 8,
         tension: 0.3,
         fill: false,
+        spanGaps: false,
       };
     });
     chart.data.datasets = datasets;
+
+    // Update y-axis format for normalized vs absolute
+    chart.options.scales.y.ticks.callback = normalizing
+      ? function(v) { return v.toFixed(2) + '%'; }
+      : function(v) {
+          if (v >= 1000000) return (v / 1000000).toFixed(v >= 10000000 ? 0 : 1) + 'M';
+          if (v >= 1000) return (v / 1000).toFixed(v >= 10000 ? 0 : 1) + 'k';
+          return v;
+        };
+
     chart.update();
     placeholder.style.display = packages.length ? 'none' : 'flex';
   }
@@ -651,12 +725,18 @@
       document.querySelector('.time-range .active').classList.remove('active');
       btn.classList.add('active');
       currentRange = btn.dataset.range;
+      clearTotalsCache();
       refreshAll();
     });
   });
 
   smoothToggle.addEventListener('change', () => {
     smoothing = smoothToggle.checked;
+    updateChart();
+  });
+
+  normalizeToggle.addEventListener('change', () => {
+    normalizing = normalizeToggle.checked;
     updateChart();
   });
 
